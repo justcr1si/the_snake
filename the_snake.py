@@ -1,7 +1,6 @@
 from random import randrange, choice
 
 import pygame
-import pygame.freetype
 
 # Константы для размеров поля и сетки:
 SCREEN_WIDTH, SCREEN_HEIGHT = 640, 480
@@ -48,14 +47,6 @@ pygame.display.set_caption("Змейка")
 # Настройка времени:
 clock = pygame.time.Clock()
 
-# Позиции объектов (для дальнейшего сравнивания в методе randomize_position())
-positions = {
-    'snake': [(0, 0)],
-    'apple': (0, 0),
-    'stone': (0, 0),
-    'poisoned_food': (0, 0),
-}
-
 
 class GameObject:
     """Описание каждого объекта на поле."""
@@ -70,43 +61,47 @@ class GameObject:
         """Абстрактный метод, который рисует объект на игровом поле."""
         pass
 
+    def paint_over(self, position):
+        """Закрашивает клетку на определенной позиции."""
+        rect = pygame.Rect(position,
+                           (GRID_SIZE, GRID_SIZE))
+        pygame.draw.rect(screen, BOARD_BACKGROUND_COLOR, rect)
+
 
 class EatableObject(GameObject):
     """Описывает абстракцию еды на поле."""
 
     def __init__(self, body_color=APPLE_COLOR) -> None:
         """Инициализирует объект еды."""
-        self.randomize_position()
-        self.body_color = body_color
+        super().__init__(body_color=body_color)
 
-    def get_name(self):
-        """Абстрактный метод, возвращает название объекта."""
-        pass
+    def generate_random_position(self):
+        """Возвращает случайную позицию."""
+        return (randrange(0, GRID_WIDTH * GRID_SIZE, GRID_SIZE),
+                randrange(0, GRID_HEIGHT * GRID_SIZE,
+                          GRID_SIZE))
 
-    def randomize_position(self):
-        """
-        Возвращает случайную позицию
-        Проверяет новую позицию, чтобы она не была равна позиции остальных
-        объектов.
-        """
+    def randomize_position(self, positions):
+        """Устанавливает объекту случайную позицию."""
         all_positions = positions.copy()
         all_positions.pop(self.get_name())
-        random_coordinate = (randrange(0, SCREEN_WIDTH - GRID_SIZE, GRID_SIZE),
-                             randrange(0, SCREEN_HEIGHT - GRID_SIZE,
-                                       GRID_SIZE))
-        x, y = random_coordinate
-        while (x, y) in positions['snake'] or (x, y) in all_positions.values():
-            x, y = (randrange(0, SCREEN_WIDTH - GRID_SIZE, GRID_SIZE),
-                    randrange(0, SCREEN_HEIGHT - GRID_SIZE,
-                              GRID_SIZE))
-        self.position = (x, y)
+        random_coordinate = self.generate_random_position()
+        position_x, position_y = random_coordinate
+        while ((position_x, position_y) in positions['snake']
+               or (position_x, position_y) in all_positions.values()):
+            position_x, position_y = self.generate_random_position()
+        self.position = (position_x, position_y)
+        positions[self.get_name()] = self.position
 
     def draw(self):
-        """Рисует определенную ячейку."""
-        rect = pygame.Rect(self.position,
-                           (GRID_SIZE, GRID_SIZE))
-        pygame.draw.rect(screen, self.body_color, rect)
-        pygame.draw.rect(screen, BORDER_COLOR, rect, 1)
+        """
+        Рисует клетку (метод родителя, принцип один и тот же во всех классах
+        потомках, без переопределения в наследниках).
+        """
+        head_rect = pygame.Rect(self.position,
+                                (GRID_SIZE, GRID_SIZE))
+        pygame.draw.rect(screen, self.body_color, head_rect)
+        pygame.draw.rect(screen, BORDER_COLOR, head_rect, 1)
 
 
 class PoisonedFood(EatableObject):
@@ -140,58 +135,58 @@ class Snake(GameObject):
     """Описание абстракции змейки на игровом поле."""
 
     def __init__(self) -> None:
-        """
-        Присваивает экземпляру змейки все необходимые атрибуты.
-        Атрибуты змейки, яблока и камня нужны для дальнейшего сброса.
-        """
-        super().__init__()
+        """Присваивает экземпляру змейки все необходимые атрибуты."""
+        super().__init__(body_color=SNAKE_COLOR)
+        self.set_default_attributes()
+
+    def set_default_attributes(self):
+        """Устанавливает начальные атрибуты змейке."""
         self.positions = [self.position]
         self.length = 1
         self.direction = RIGHT
-        self.body_color = SNAKE_COLOR
+        self.last = None
 
     def update_direction(self, direction):
         """Обновляет направление движения змейки."""
-        if direction in [RIGHT, LEFT, UP, DOWN]:
-            self.direction = direction
+        self.direction = direction
 
     def move(self):
         """Двигает змейку относительно направления движения."""
         head_coordinates = self.get_head_position()
-        if self.direction in [RIGHT, LEFT]:
-            step = GRID_SIZE * self.direction[0]
-            self.positions.insert(
-                0, ((head_coordinates[0]
-                     + step) % SCREEN_WIDTH,
-                    head_coordinates[1])
-            )
-        elif self.direction in [UP, DOWN]:
-            step = GRID_SIZE * self.direction[1]
-            self.positions.insert(
-                0, (head_coordinates[0],
-                    (head_coordinates[1] + step)
-                    % SCREEN_HEIGHT)
-            )
-        if len(self.positions) > self.length:
-            self.positions.pop()
+        step = [x * GRID_SIZE for x in self.direction]
+        step_x, step_y = step
+        position_x, position_y = head_coordinates[0], head_coordinates[1]
+        new_head_position = ((position_x + step_x) % SCREEN_WIDTH,
+                             (position_y + step_y) % SCREEN_HEIGHT)
+        self.positions.insert(0, new_head_position)
 
     def draw(self):
         """Отрисовывает змейку на игровом поле."""
-        for position in self.positions:
-            rect = pygame.Rect(position, (GRID_SIZE, GRID_SIZE))
-            pygame.draw.rect(screen, self.body_color, rect)
-            pygame.draw.rect(screen, BORDER_COLOR, rect, 1)
+        if len(self.positions) > self.length:
+            self.last = self.positions.pop()
+        else:
+            self.last = None
+
+        head_rect = pygame.Rect(self.get_head_position(),
+                                (GRID_SIZE, GRID_SIZE))
+        pygame.draw.rect(screen, self.body_color, head_rect)
+        pygame.draw.rect(screen, BORDER_COLOR, head_rect, 1)
+
+        if self.last:
+            self.paint_over(self.last)
 
     def get_head_position(self):
         """Возвращает координаты головы змейки."""
         return self.positions[0]
 
-    def reset(self, apple, poisoned_food, stone):
+    def reset(self):
         """Сбрасывает всю змейку и ставит ей начальные координаты."""
-        self.__init__()
-        apple.randomize_position()
-        poisoned_food.randomize_position()
-        stone.randomize_position()
+        for position in self.positions:
+            rect = pygame.Rect(position,
+                               (GRID_SIZE, GRID_SIZE))
+            pygame.draw.rect(screen, BOARD_BACKGROUND_COLOR, rect)
+        self.set_default_attributes()
+        self.direction = choice([RIGHT, LEFT, UP, DOWN])
 
 
 def handle_keys(game_object):
@@ -212,21 +207,37 @@ def handle_keys(game_object):
 
 
 def main():
-    """Основная функция игры. Создаются экземпляры класса змейки и яблока."""
+    """Основная функция игры. Создаются экземпляры классов."""
     pygame.init()
-    pygame.font.init()
     pygame.display.update()
-    snake = Snake()
-    apple = Apple()
-    poisoned_food = PoisonedFood(POISONED_FOOD_COLOR)
-    stone = Stone(STONE_COLOR)
 
-    game_font = pygame.font.SysFont("Times New Roman", 24)
+    """
+    Локальная переменная для хранения позиций объектов для
+    дальнейшего сравнения в randomize_position().
+    """
+    positions = {
+
+    }
+
+    # Передаем в инициализатор позиции объектов для дальнейшего сравнивания
+    snake = Snake()
+    apple = Apple()  # Передается локальная переменная positions
+    poisoned_food = PoisonedFood(POISONED_FOOD_COLOR)
+    stone = Stone(STONE_COLOR)  # Необходимый первый аргумент
+
+    positions['snake'] = snake.positions
+    positions['apple'] = apple.position
+    positions['stone'] = stone.position
+    positions['poisoned_food'] = poisoned_food.position
+
+    apple.randomize_position(positions)
+    stone.randomize_position(positions)
+    poisoned_food.randomize_position(positions)
 
     while True:
         clock.tick(SPEED)
         handle_keys(snake)
-        screen.fill(BOARD_BACKGROUND_COLOR)  # Заливаем фоном
+
         snake.move()
         snake.draw()
         apple.draw()
@@ -235,34 +246,34 @@ def main():
         snake_head = snake.get_head_position()
 
         positions['snake'] = snake.positions
-        positions['poisoned_food'] = poisoned_food.position
-        positions['stone'] = stone.position
-        positions['apple'] = apple.position
 
         if snake_head == apple.position:
-            apple.randomize_position()
+            apple.randomize_position(positions)
             snake.length += 1
+            snake.draw()
         elif snake_head == poisoned_food.position:
-            poisoned_food.randomize_position()
             if snake.length == 1:
-                snake.reset(apple, poisoned_food, stone)
+                reset_objects(apple, stone, snake=snake)
             else:
                 snake.length -= 1
-                snake.positions.pop()
+                snake.draw()
+            poisoned_food.randomize_position(positions)
         elif snake_head == stone.position:
-            snake.reset(apple, poisoned_food, stone)
-            snake.direction = choice([RIGHT, LEFT, UP, DOWN])
-        for position in snake.positions[1:]:
-            if snake_head == position:
-                snake.reset(apple, poisoned_food, stone)
-
-        text_message = game_font.render(
-            f"Score: {snake.length}", True, (0, 255, 0))
-        screen.blit(
-            text_message, (SCREEN_WIDTH // 2
-                           - text_message.get_width() // 2, 0)
-        )
+            reset_objects(positions, apple, stone, poisoned_food, snake=snake)
+        elif snake_head in snake.positions[1:]:
+            reset_objects(positions, apple, stone, poisoned_food, snake=snake)
         pygame.display.update()
+
+
+def reset_objects(positions, *args, snake=None):
+    """Сбрасывает объекты."""
+    if snake:
+        snake.reset()
+        # Сбрасываем змейку, иначе ничего не делаем
+        positions['snake'] = snake.positions
+    for object in args:
+        object.paint_over(object.position)
+        object.randomize_position(positions)
 
 
 if __name__ == "__main__":
